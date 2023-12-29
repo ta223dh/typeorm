@@ -9,541 +9,543 @@ import { PostAuthor } from "../../sample/sample3-many-to-one/entity/PostAuthor"
 import { PostMetadata } from "../../sample/sample3-many-to-one/entity/PostMetadata"
 import { PostImage } from "../../sample/sample3-many-to-one/entity/PostImage"
 import { PostInformation } from "../../sample/sample3-many-to-one/entity/PostInformation"
-import { setupSingleTestingConnection } from "../utils/test-utils"
+import { closeTestingConnections, createTestingConnectionsFromDataSourceOptions, reloadTestingDatabases, setupTestingConnections } from "../utils/test-utils"
+import {DataSourceOptions} from '../../src'
 
 describe("many-to-one", function () {
     // -------------------------------------------------------------------------
     // Configuration
     // -------------------------------------------------------------------------
 
-    // connect to db
-    let dataSource: DataSource
-    before(async function () {
-        const options = setupSingleTestingConnection("mysql", {
-            entities: [
-                Post,
-                PostDetails,
-                PostCategory,
-                PostMetadata,
-                PostImage,
-                PostInformation,
-                PostAuthor,
-            ],
-        })
-
-        if (!options) return
-        dataSource = new DataSource(options)
-        await dataSource.initialize()
+    let dataSourceOptionsList: DataSourceOptions[] = setupTestingConnections({
+        entities: [
+            Post,
+            PostDetails,
+            PostCategory,
+            PostMetadata,
+            PostImage,
+            PostInformation,
+            PostAuthor,
+        ],
     })
 
-    after(() => dataSource.destroy())
-
-    // clean up database before each test
-    function reloadDatabase() {
-        if (!dataSource) return
-        return dataSource.synchronize(true)
+    if (dataSourceOptionsList.length < 1) {
+        throw new Error("No database connection found to run integration tests")
     }
 
-    let postRepository: Repository<Post>,
-        postDetailsRepository: Repository<PostDetails>,
-        postCategoryRepository: Repository<PostCategory>,
-        postImageRepository: Repository<PostImage>,
-        postMetadataRepository: Repository<PostMetadata>
-    before(function () {
-        if (!dataSource) return
-        postRepository = dataSource.getRepository(Post)
-        postDetailsRepository = dataSource.getRepository(PostDetails)
-        postCategoryRepository = dataSource.getRepository(PostCategory)
-        postImageRepository = dataSource.getRepository(PostImage)
-        postMetadataRepository = dataSource.getRepository(PostMetadata)
-    })
+    for (const dataSourceOptions of dataSourceOptionsList) {
+        describe(`${dataSourceOptions.name}`, () => {
+            let connection: DataSource
 
-    // -------------------------------------------------------------------------
-    // Specifications
-    // -------------------------------------------------------------------------
+            let postRepository: Repository<Post>,
+                postDetailsRepository: Repository<PostDetails>,
+                postCategoryRepository: Repository<PostCategory>,
+                postImageRepository: Repository<PostImage>,
+                postMetadataRepository: Repository<PostMetadata>
 
-    describe("insert post and details (has inverse relation + full cascade options)", function () {
-        if (!dataSource) return
-        let newPost: Post, details: PostDetails, savedPost: Post
+            before(async () => {
+                ;[connection] = await createTestingConnectionsFromDataSourceOptions([
+                    dataSourceOptions,
+                ])
 
-        before(reloadDatabase)
+                postRepository = connection.getRepository(Post)
+                postDetailsRepository = connection.getRepository(PostDetails)
+                postCategoryRepository = connection.getRepository(PostCategory)
+                postImageRepository = connection.getRepository(PostImage)
+                postMetadataRepository = connection.getRepository(PostMetadata)
+            })
 
-        before(function () {
-            details = new PostDetails()
-            details.authorName = "Umed"
-            details.comment = "this is post"
-            details.metadata = "post,posting,postman"
+            after(() => closeTestingConnections([connection]))
 
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-            newPost.details = details
-            return postRepository
-                .save(newPost)
-                .then((post) => (savedPost = post as Post))
-        })
+            describe("insert post and details (has inverse relation + full cascade options)", function () {
+                let newPost: Post, details: PostDetails, savedPost: Post
 
-        it("should return the same post instance after its created", function () {
-            savedPost.should.be.equal(newPost)
-        })
-
-        it("should return the same post details instance after its created", function () {
-            savedPost.details!.should.be.equal(newPost.details)
-        })
-
-        it("should have a new generated id after post is created", function () {
-            expect(savedPost.id).not.to.be.undefined
-            expect(savedPost.details!.id).not.to.be.undefined
-        })
-
-        it("should have inserted post in the database", function () {
-            if (!dataSource) return
-            const expectedPost = new Post()
-            expectedPost.id = savedPost.id
-            expectedPost.text = savedPost.text
-            expectedPost.title = savedPost.title
-
-            return postRepository
-                .findOneBy({
-                    id: savedPost.id,
+                before(async () => {
+                    await reloadTestingDatabases([connection])
                 })
-                .should.eventually.eql(expectedPost)
-        })
 
-        it("should have inserted post details in the database", function () {
-            if (!dataSource) return
-            const expectedDetails = new PostDetails()
-            expectedDetails.id = savedPost.details!.id
-            expectedDetails.authorName = savedPost.details!.authorName
-            expectedDetails.comment = savedPost.details!.comment
-            expectedDetails.metadata = savedPost.details!.metadata
+                before(function () {
+                    details = new PostDetails()
+                    details.authorName = "Umed"
+                    details.comment = "this is post"
+                    details.metadata = "post,posting,postman"
 
-            return postDetailsRepository
-                .findOneBy({
-                    id: savedPost.details!.id,
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+                    newPost.details = details
+                    return postRepository
+                        .save(newPost)
+                        .then((post) => (savedPost = post as Post))
                 })
-                .should.eventually.eql(expectedDetails)
-        })
 
-        it("should load post and its details if left join used", function () {
-            if (!dataSource) return
-            const expectedPost = new Post()
-            expectedPost.id = savedPost.id
-            expectedPost.text = savedPost.text
-            expectedPost.title = savedPost.title
-            expectedPost.details = new PostDetails()
-            expectedPost.details.id = savedPost.details!.id
-            expectedPost.details.authorName = savedPost.details!.authorName
-            expectedPost.details.comment = savedPost.details!.comment
-            expectedPost.details.metadata = savedPost.details!.metadata
-
-            return postRepository
-                .createQueryBuilder("post")
-                .leftJoinAndSelect("post.details", "details")
-                .where("post.id=:id")
-                .setParameter("id", savedPost.id)
-                .getOne()
-                .should.eventually.eql(expectedPost)
-        })
-
-        it("should load details and its post if left join used (from reverse side)", function () {
-            if (!dataSource) return
-
-            const expectedDetails = new PostDetails()
-            expectedDetails.id = savedPost.details!.id
-            expectedDetails.authorName = savedPost.details!.authorName
-            expectedDetails.comment = savedPost.details!.comment
-            expectedDetails.metadata = savedPost.details!.metadata
-
-            const expectedPost = new Post()
-            expectedPost.id = savedPost.id
-            expectedPost.text = savedPost.text
-            expectedPost.title = savedPost.title
-
-            expectedDetails.posts = []
-            expectedDetails.posts.push(expectedPost)
-
-            return postDetailsRepository
-                .createQueryBuilder("details")
-                .leftJoinAndSelect("details.posts", "posts")
-                .where("details.id=:id")
-                .setParameter("id", savedPost.id)
-                .getOne()
-                .should.eventually.eql(expectedDetails)
-        })
-
-        it("should load saved post without details if left joins are not specified", function () {
-            if (!dataSource) return
-            const expectedPost = new Post()
-            expectedPost.id = savedPost.id
-            expectedPost.text = savedPost.text
-            expectedPost.title = savedPost.title
-
-            return postRepository
-                .createQueryBuilder("post")
-                .where("post.id=:id", { id: savedPost.id })
-                .getOne()
-                .should.eventually.eql(expectedPost)
-        })
-
-        it("should load saved post without details if left joins are not specified", function () {
-            if (!dataSource) return
-            const expectedDetails = new PostDetails()
-            expectedDetails.id = savedPost.details!.id
-            expectedDetails.authorName = savedPost.details!.authorName
-            expectedDetails.comment = savedPost.details!.comment
-            expectedDetails.metadata = savedPost.details!.metadata
-
-            return postDetailsRepository
-                .createQueryBuilder("details")
-                .where("details.id=:id", { id: savedPost.id })
-                .getOne()
-                .should.eventually.eql(expectedDetails)
-        })
-    })
-
-    describe("insert post and category (one-side relation)", function () {
-        if (!dataSource) return
-        let newPost: Post, category: PostCategory, savedPost: Post
-
-        before(reloadDatabase)
-
-        before(function () {
-            category = new PostCategory()
-            category.name = "technology"
-
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-            newPost.category = category
-
-            return postRepository
-                .save(newPost)
-                .then((post) => (savedPost = post as Post))
-        })
-
-        it("should return the same post instance after its created", function () {
-            savedPost.should.be.equal(newPost)
-        })
-
-        it("should return the same post category instance after its created", function () {
-            savedPost.category.should.be.equal(newPost.category)
-        })
-
-        it("should have a new generated id after post is created", function () {
-            expect(savedPost.id).not.to.be.undefined
-            expect(savedPost.category.id).not.to.be.undefined
-        })
-
-        it("should have inserted post in the database", function () {
-            if (!dataSource) return
-            const expectedPost = new Post()
-            expectedPost.id = savedPost.id
-            expectedPost.text = savedPost.text
-            expectedPost.title = savedPost.title
-            return postRepository
-                .findOneBy({
-                    id: savedPost.id,
+                it("should return the same post instance after its created", function () {
+                    savedPost.should.be.equal(newPost)
                 })
-                .should.eventually.eql(expectedPost)
-        })
 
-        it("should have inserted category in the database", function () {
-            if (!dataSource) return
-            const expectedPost = new PostCategory()
-            expectedPost.id = savedPost.category.id
-            expectedPost.name = "technology"
-            return postCategoryRepository
-                .findOneBy({
-                    id: savedPost.category.id,
+                it("should return the same post details instance after its created", function () {
+                    savedPost.details!.should.be.equal(newPost.details)
                 })
-                .should.eventually.eql(expectedPost)
-        })
 
-        it("should load post and its category if left join used", function () {
-            if (!dataSource) return
-            const expectedPost = new Post()
-            expectedPost.id = savedPost.id
-            expectedPost.title = savedPost.title
-            expectedPost.text = savedPost.text
-            expectedPost.category = new PostCategory()
-            expectedPost.category.id = savedPost.category.id
-            expectedPost.category.name = savedPost.category.name
+                it("should have a new generated id after post is created", function () {
+                    expect(savedPost.id).not.to.be.undefined
+                    expect(savedPost.details!.id).not.to.be.undefined
+                })
 
-            return postRepository
-                .createQueryBuilder("post")
-                .leftJoinAndSelect("post.category", "category")
-                .where("post.id=:id", { id: savedPost.id })
-                .getOne()
-                .should.eventually.eql(expectedPost)
-        })
+                it("should have inserted post in the database", function () {
+                    const expectedPost = new Post()
+                    expectedPost.id = savedPost.id
+                    expectedPost.text = savedPost.text
+                    expectedPost.title = savedPost.title
 
-        it("should load details and its post if left join used (from reverse side)", function () {
-            // later need to specify with what exception we reject it
-            /*return postCategoryRepository
+                    return postRepository
+                        .findOneBy({
+                            id: savedPost.id,
+                        })
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should have inserted post details in the database", function () {
+                    const expectedDetails = new PostDetails()
+                    expectedDetails.id = savedPost.details!.id
+                    expectedDetails.authorName = savedPost.details!.authorName
+                    expectedDetails.comment = savedPost.details!.comment
+                    expectedDetails.metadata = savedPost.details!.metadata
+
+                    return postDetailsRepository
+                        .findOneBy({
+                            id: savedPost.details!.id,
+                        })
+                        .should.eventually.eql(expectedDetails)
+                })
+
+                it("should load post and its details if left join used", function () {
+                    const expectedPost = new Post()
+                    expectedPost.id = savedPost.id
+                    expectedPost.text = savedPost.text
+                    expectedPost.title = savedPost.title
+                    expectedPost.details = new PostDetails()
+                    expectedPost.details.id = savedPost.details!.id
+                    expectedPost.details.authorName =
+                        savedPost.details!.authorName
+                    expectedPost.details.comment = savedPost.details!.comment
+                    expectedPost.details.metadata = savedPost.details!.metadata
+
+                    return postRepository
+                        .createQueryBuilder("post")
+                        .leftJoinAndSelect("post.details", "details")
+                        .where("post.id=:id")
+                        .setParameter("id", savedPost.id)
+                        .getOne()
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should load details and its post if left join used (from reverse side)", function () {
+                    const expectedDetails = new PostDetails()
+                    expectedDetails.id = savedPost.details!.id
+                    expectedDetails.authorName = savedPost.details!.authorName
+                    expectedDetails.comment = savedPost.details!.comment
+                    expectedDetails.metadata = savedPost.details!.metadata
+
+                    const expectedPost = new Post()
+                    expectedPost.id = savedPost.id
+                    expectedPost.text = savedPost.text
+                    expectedPost.title = savedPost.title
+
+                    expectedDetails.posts = []
+                    expectedDetails.posts.push(expectedPost)
+
+                    return postDetailsRepository
+                        .createQueryBuilder("details")
+                        .leftJoinAndSelect("details.posts", "posts")
+                        .where("details.id=:id")
+                        .setParameter("id", savedPost.id)
+                        .getOne()
+                        .should.eventually.eql(expectedDetails)
+                })
+
+                it("should load saved post without details if left joins are not specified", function () {
+                    const expectedPost = new Post()
+                    expectedPost.id = savedPost.id
+                    expectedPost.text = savedPost.text
+                    expectedPost.title = savedPost.title
+
+                    return postRepository
+                        .createQueryBuilder("post")
+                        .where("post.id=:id", { id: savedPost.id })
+                        .getOne()
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should load saved post without details if left joins are not specified", function () {
+                    const expectedDetails = new PostDetails()
+                    expectedDetails.id = savedPost.details!.id
+                    expectedDetails.authorName = savedPost.details!.authorName
+                    expectedDetails.comment = savedPost.details!.comment
+                    expectedDetails.metadata = savedPost.details!.metadata
+
+                    return postDetailsRepository
+                        .createQueryBuilder("details")
+                        .where("details.id=:id", { id: savedPost.id })
+                        .getOne()
+                        .should.eventually.eql(expectedDetails)
+                })
+            })
+
+            describe("insert post and category (one-side relation)", function () {
+                let newPost: Post, category: PostCategory, savedPost: Post
+
+                before(async () => {
+                    await reloadTestingDatabases([connection])
+                })
+
+                before(function () {
+                    category = new PostCategory()
+                    category.name = "technology"
+
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+                    newPost.category = category
+
+                    return postRepository
+                        .save(newPost)
+                        .then((post) => (savedPost = post as Post))
+                })
+
+                it("should return the same post instance after its created", function () {
+                    savedPost.should.be.equal(newPost)
+                })
+
+                it("should return the same post category instance after its created", function () {
+                    savedPost.category.should.be.equal(newPost.category)
+                })
+
+                it("should have a new generated id after post is created", function () {
+                    expect(savedPost.id).not.to.be.undefined
+                    expect(savedPost.category.id).not.to.be.undefined
+                })
+
+                it("should have inserted post in the database", function () {
+                    const expectedPost = new Post()
+                    expectedPost.id = savedPost.id
+                    expectedPost.text = savedPost.text
+                    expectedPost.title = savedPost.title
+                    return postRepository
+                        .findOneBy({
+                            id: savedPost.id,
+                        })
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should have inserted category in the database", function () {
+                    const expectedPost = new PostCategory()
+                    expectedPost.id = savedPost.category.id
+                    expectedPost.name = "technology"
+                    return postCategoryRepository
+                        .findOneBy({
+                            id: savedPost.category.id,
+                        })
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should load post and its category if left join used", function () {
+                    const expectedPost = new Post()
+                    expectedPost.id = savedPost.id
+                    expectedPost.title = savedPost.title
+                    expectedPost.text = savedPost.text
+                    expectedPost.category = new PostCategory()
+                    expectedPost.category.id = savedPost.category.id
+                    expectedPost.category.name = savedPost.category.name
+
+                    return postRepository
+                        .createQueryBuilder("post")
+                        .leftJoinAndSelect("post.category", "category")
+                        .where("post.id=:id", { id: savedPost.id })
+                        .getOne()
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should load details and its post if left join used (from reverse side)", function () {
+                    // later need to specify with what exception we reject it
+                    /*return postCategoryRepository
                 .createQueryBuilder("category")
                 .leftJoinAndSelect("category.post", "post")
                 .where("category.id=:id", { id: savedPost.id })
                 .getSingleResult()
                 .should.be.rejectedWith(Error);*/
-            // not working, find fix
-        })
-    })
-
-    describe("cascade updates should not be executed when cascadeUpdate option is not set", function () {
-        if (!dataSource) return
-        let newPost: Post, details: PostDetails
-
-        before(reloadDatabase)
-
-        before(function () {
-            details = new PostDetails()
-            details.authorName = "Umed"
-            details.comment = "this is post"
-            details.metadata = "post,posting,postman"
-
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-            newPost.details = details
-
-            return postRepository.save(newPost)
-        })
-
-        it("should ignore updates in the model and do not update the db when entity is updated", function () {
-            newPost.details!.comment = "i am updated comment"
-            return postRepository
-                .save(newPost)
-                .then((updatedPost) => {
-                    updatedPost.details!.comment!.should.be.equal(
-                        "i am updated comment",
-                    )
-                    return postRepository
-                        .createQueryBuilder("post")
-                        .leftJoinAndSelect("post.details", "details")
-                        .where("post.id=:id")
-                        .setParameter("id", updatedPost.id)
-                        .getOne()
+                    // not working, find fix
                 })
-                .then((updatedPostReloaded) => {
-                    updatedPostReloaded!.details!.comment!.should.be.equal(
-                        "this is post",
-                    )
+            })
+
+            describe("cascade updates should not be executed when cascadeUpdate option is not set", function () {
+                let newPost: Post, details: PostDetails
+
+                before(async () => {
+                    await reloadTestingDatabases([connection])
                 })
-        }) // todo: also check that updates throw exception in strict cascades mode
-    })
 
-    describe("cascade remove should not be executed when cascadeRemove option is not set", function () {
-        if (!dataSource) return
-        let newPost: Post, details: PostDetails
+                before(function () {
+                    details = new PostDetails()
+                    details.authorName = "Umed"
+                    details.comment = "this is post"
+                    details.metadata = "post,posting,postman"
 
-        before(reloadDatabase)
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+                    newPost.details = details
 
-        before(function () {
-            details = new PostDetails()
-            details.authorName = "Umed"
-            details.comment = "this is post"
-            details.metadata = "post,posting,postman"
-
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-            newPost.details = details
-
-            return postRepository.save(newPost)
-        })
-
-        it("should ignore updates in the model and do not update the db when entity is updated", function () {
-            delete newPost.details
-            return postRepository
-                .save(newPost)
-                .then((updatedPost) => {
-                    return postRepository
-                        .createQueryBuilder("post")
-                        .leftJoinAndSelect("post.details", "details")
-                        .where("post.id=:id")
-                        .setParameter("id", updatedPost.id)
-                        .getOne()
-                })
-                .then((updatedPostReloaded) => {
-                    updatedPostReloaded!.details!.comment!.should.be.equal(
-                        "this is post",
-                    )
-                })
-        })
-    })
-
-    describe("cascade updates should be executed when cascadeUpdate option is set", function () {
-        if (!dataSource) return
-        let newPost: Post, newImage: PostImage
-
-        before(reloadDatabase)
-
-        it("should update a relation successfully when updated", function () {
-            newImage = new PostImage()
-            newImage.url = "logo.png"
-
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-
-            return postImageRepository
-                .save(newImage)
-                .then((image) => {
-                    newPost.image = image as PostImage
                     return postRepository.save(newPost)
                 })
-                .then((post) => {
-                    newPost = post as Post
+
+                it("should ignore updates in the model and do not update the db when entity is updated", function () {
+                    newPost.details!.comment = "i am updated comment"
                     return postRepository
-                        .createQueryBuilder("post")
-                        .leftJoinAndSelect("post.image", "image")
-                        .where("post.id=:id")
-                        .setParameter("id", post.id)
-                        .getOne()
+                        .save(newPost)
+                        .then((updatedPost) => {
+                            updatedPost.details!.comment!.should.be.equal(
+                                "i am updated comment",
+                            )
+                            return postRepository
+                                .createQueryBuilder("post")
+                                .leftJoinAndSelect("post.details", "details")
+                                .where("post.id=:id")
+                                .setParameter("id", updatedPost.id)
+                                .getOne()
+                        })
+                        .then((updatedPostReloaded) => {
+                            updatedPostReloaded!.details!.comment!.should.be.equal(
+                                "this is post",
+                            )
+                        })
+                }) // todo: also check that updates throw exception in strict cascades mode
+            })
+
+            describe("cascade remove should not be executed when cascadeRemove option is not set", function () {
+                let newPost: Post, details: PostDetails
+
+                before(async () => {
+                    await reloadTestingDatabases([connection])
                 })
-                .then((loadedPost) => {
-                    loadedPost!.image.url = "new-logo.png"
-                    return postRepository.save(loadedPost!)
-                })
-                .then(() => {
-                    return postRepository
-                        .createQueryBuilder("post")
-                        .leftJoinAndSelect("post.image", "image")
-                        .where("post.id=:id")
-                        .setParameter("id", newPost.id)
-                        .getOne()
-                })
-                .then((reloadedPost) => {
-                    reloadedPost!.image.url.should.be.equal("new-logo.png")
-                })
-        })
-    })
 
-    describe("cascade remove should be executed when cascadeRemove option is set", function () {
-        if (!dataSource) return
-        let newPost: Post, newMetadata: PostMetadata
+                before(function () {
+                    details = new PostDetails()
+                    details.authorName = "Umed"
+                    details.comment = "this is post"
+                    details.metadata = "post,posting,postman"
 
-        before(reloadDatabase)
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+                    newPost.details = details
 
-        it("should remove a relation entity successfully when removed", function () {
-            newMetadata = new PostMetadata()
-            newMetadata.description = "this is post metadata"
-
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-
-            return postMetadataRepository
-                .save(newMetadata)
-                .then((metadata) => {
-                    newPost.metadata = metadata as PostMetadata
                     return postRepository.save(newPost)
                 })
-                .then((post) => {
-                    newPost = post as Post
+
+                it("should ignore updates in the model and do not update the db when entity is updated", function () {
+                    delete newPost.details
                     return postRepository
-                        .createQueryBuilder("post")
-                        .leftJoinAndSelect("post.metadata", "metadata")
-                        .where("post.id=:id")
-                        .setParameter("id", post.id)
-                        .getOne()
+                        .save(newPost)
+                        .then((updatedPost) => {
+                            return postRepository
+                                .createQueryBuilder("post")
+                                .leftJoinAndSelect("post.details", "details")
+                                .where("post.id=:id")
+                                .setParameter("id", updatedPost.id)
+                                .getOne()
+                        })
+                        .then((updatedPostReloaded) => {
+                            updatedPostReloaded!.details!.comment!.should.be.equal(
+                                "this is post",
+                            )
+                        })
                 })
-                .then((loadedPost) => {
-                    loadedPost!.metadata = null
-                    return postRepository.save(loadedPost!)
+            })
+
+            describe("cascade updates should be executed when cascadeUpdate option is set", function () {
+                let newPost: Post, newImage: PostImage
+
+                before(async () => {
+                    await reloadTestingDatabases([connection])
                 })
-                .then(() => {
+
+                it("should update a relation successfully when updated", function () {
+                    newImage = new PostImage()
+                    newImage.url = "logo.png"
+
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+
+                    return postImageRepository
+                        .save(newImage)
+                        .then((image) => {
+                            newPost.image = image as PostImage
+                            return postRepository.save(newPost)
+                        })
+                        .then((post) => {
+                            newPost = post as Post
+                            return postRepository
+                                .createQueryBuilder("post")
+                                .leftJoinAndSelect("post.image", "image")
+                                .where("post.id=:id")
+                                .setParameter("id", post.id)
+                                .getOne()
+                        })
+                        .then((loadedPost) => {
+                            loadedPost!.image.url = "new-logo.png"
+                            return postRepository.save(loadedPost!)
+                        })
+                        .then(() => {
+                            return postRepository
+                                .createQueryBuilder("post")
+                                .leftJoinAndSelect("post.image", "image")
+                                .where("post.id=:id")
+                                .setParameter("id", newPost.id)
+                                .getOne()
+                        })
+                        .then((reloadedPost) => {
+                            reloadedPost!.image.url.should.be.equal(
+                                "new-logo.png",
+                            )
+                        })
+                })
+            })
+
+            describe("cascade remove should be executed when cascadeRemove option is set", function () {
+                let newPost: Post, newMetadata: PostMetadata
+
+                before(async () => {
+                    await reloadTestingDatabases([connection])
+                })
+
+                it("should remove a relation entity successfully when removed", function () {
+                    newMetadata = new PostMetadata()
+                    newMetadata.description = "this is post metadata"
+
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+
+                    return postMetadataRepository
+                        .save(newMetadata)
+                        .then((metadata) => {
+                            newPost.metadata = metadata as PostMetadata
+                            return postRepository.save(newPost)
+                        })
+                        .then((post) => {
+                            newPost = post as Post
+                            return postRepository
+                                .createQueryBuilder("post")
+                                .leftJoinAndSelect("post.metadata", "metadata")
+                                .where("post.id=:id")
+                                .setParameter("id", post.id)
+                                .getOne()
+                        })
+                        .then((loadedPost) => {
+                            loadedPost!.metadata = null
+                            return postRepository.save(loadedPost!)
+                        })
+                        .then(() => {
+                            return postRepository
+                                .createQueryBuilder("post")
+                                .leftJoinAndSelect("post.metadata", "metadata")
+                                .where("post.id=:id")
+                                .setParameter("id", newPost.id)
+                                .getOne()
+                        })
+                        .then((reloadedPost) => {
+                            expect(reloadedPost!.metadata).to.be.null
+                        })
+                })
+            })
+
+            describe("insert post details from reverse side", function () {
+                let newPost: Post,
+                    details: PostDetails,
+                    savedDetails: PostDetails
+
+                before(async () => {
+                    await reloadTestingDatabases([connection])
+                })
+
+                before(function () {
+                    newPost = new Post()
+                    newPost.text = "Hello post"
+                    newPost.title = "this is post title"
+
+                    details = new PostDetails()
+                    details.comment = "post details comment"
+                    details.posts = []
+                    details.posts.push(newPost)
+
+                    return postDetailsRepository
+                        .save(details)
+                        .then(
+                            (details) =>
+                                (savedDetails = details as PostDetails),
+                        )
+                })
+
+                it("should return the same post instance after its created", function () {
+                    savedDetails.posts[0].should.be.equal(newPost)
+                })
+
+                it("should return the same post details instance after its created", function () {
+                    savedDetails.should.be.equal(details)
+                })
+
+                it("should have a new generated id after post is created", function () {
+                    expect(savedDetails.id).not.to.be.undefined
+                    expect(details.id).not.to.be.undefined
+                })
+
+                it("should have inserted post in the database", function () {
+                    const expectedPost = new Post()
+                    expectedPost.id = newPost.id
+                    expectedPost.text = newPost.text
+                    expectedPost.title = newPost.title
                     return postRepository
-                        .createQueryBuilder("post")
-                        .leftJoinAndSelect("post.metadata", "metadata")
-                        .where("post.id=:id")
-                        .setParameter("id", newPost.id)
+                        .findOneBy({
+                            id: savedDetails.id,
+                        })
+                        .should.eventually.eql(expectedPost)
+                })
+
+                it("should have inserted details in the database", function () {
+                    const expectedDetails = new PostDetails()
+                    expectedDetails.id = details.id
+                    expectedDetails.comment = details.comment
+                    expectedDetails.metadata = null
+                    expectedDetails.authorName = null
+                    return postDetailsRepository
+                        .findOneBy({
+                            id: details.id,
+                        })
+                        .should.eventually.eql(expectedDetails)
+                })
+
+                it("should load post and its details if left join used", function () {
+                    const expectedDetails = new PostDetails()
+                    expectedDetails.id = savedDetails.id
+                    expectedDetails.comment = savedDetails.comment
+                    expectedDetails.metadata = null
+                    expectedDetails.authorName = null
+                    expectedDetails.posts = []
+                    expectedDetails.posts.push(new Post())
+                    expectedDetails.posts[0].id = newPost.id
+                    expectedDetails.posts[0].text = newPost.text
+                    expectedDetails.posts[0].title = newPost.title
+
+                    return postDetailsRepository
+                        .createQueryBuilder("details")
+                        .leftJoinAndSelect("details.posts", "posts")
+                        .where("details.id=:id", { id: savedDetails.id })
                         .getOne()
+                        .should.eventually.eql(expectedDetails)
                 })
-                .then((reloadedPost) => {
-                    expect(reloadedPost!.metadata).to.be.null
-                })
+            })
         })
-    })
-
-    describe("insert post details from reverse side", function () {
-        if (!dataSource) return
-        let newPost: Post, details: PostDetails, savedDetails: PostDetails
-
-        before(reloadDatabase)
-
-        before(function () {
-            newPost = new Post()
-            newPost.text = "Hello post"
-            newPost.title = "this is post title"
-
-            details = new PostDetails()
-            details.comment = "post details comment"
-            details.posts = []
-            details.posts.push(newPost)
-
-            return postDetailsRepository
-                .save(details)
-                .then((details) => (savedDetails = details as PostDetails))
-        })
-
-        it("should return the same post instance after its created", function () {
-            savedDetails.posts[0].should.be.equal(newPost)
-        })
-
-        it("should return the same post details instance after its created", function () {
-            savedDetails.should.be.equal(details)
-        })
-
-        it("should have a new generated id after post is created", function () {
-            expect(savedDetails.id).not.to.be.undefined
-            expect(details.id).not.to.be.undefined
-        })
-
-        it("should have inserted post in the database", function () {
-            const expectedPost = new Post()
-            expectedPost.id = newPost.id
-            expectedPost.text = newPost.text
-            expectedPost.title = newPost.title
-            return postRepository
-                .findOneBy({
-                    id: savedDetails.id,
-                })
-                .should.eventually.eql(expectedPost)
-        })
-
-        it("should have inserted details in the database", function () {
-            const expectedDetails = new PostDetails()
-            expectedDetails.id = details.id
-            expectedDetails.comment = details.comment
-            expectedDetails.metadata = null
-            expectedDetails.authorName = null
-            return postDetailsRepository
-                .findOneBy({
-                    id: details.id,
-                })
-                .should.eventually.eql(expectedDetails)
-        })
-
-        it("should load post and its details if left join used", function () {
-            const expectedDetails = new PostDetails()
-            expectedDetails.id = savedDetails.id
-            expectedDetails.comment = savedDetails.comment
-            expectedDetails.metadata = null
-            expectedDetails.authorName = null
-            expectedDetails.posts = []
-            expectedDetails.posts.push(new Post())
-            expectedDetails.posts[0].id = newPost.id
-            expectedDetails.posts[0].text = newPost.text
-            expectedDetails.posts[0].title = newPost.title
-
-            return postDetailsRepository
-                .createQueryBuilder("details")
-                .leftJoinAndSelect("details.posts", "posts")
-                .where("details.id=:id", { id: savedDetails.id })
-                .getOne()
-                .should.eventually.eql(expectedDetails)
-        })
-    })
+    }    
 })

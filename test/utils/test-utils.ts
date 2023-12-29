@@ -372,6 +372,104 @@ export function createDataSource(options: DataSourceOptions): DataSource {
     return new DataSource(options)
 }
 
+export async function createTestingConnectionsFromDataSourceOptions(
+  dataSourceOptions: DataSourceOptions[],
+) {
+  const dataSources: DataSource[] = []
+  for (let options of dataSourceOptions) {
+      const dataSource = createDataSource(options)
+      await dataSource.initialize()
+      dataSources.push(dataSource)
+  }
+
+  await Promise.all(
+      dataSources.map(async (connection) => {
+          // create new databases
+          const databases: string[] = []
+          connection.entityMetadatas.forEach((metadata) => {
+              if (
+                  metadata.database &&
+                  databases.indexOf(metadata.database) === -1
+              )
+                  databases.push(metadata.database)
+          })
+
+          const queryRunner = connection.createQueryRunner()
+
+          for (const database of databases) {
+              await queryRunner.createDatabase(database, true)
+          }
+
+          if (connection.driver.options.type === "cockroachdb") {
+              await queryRunner.query(
+                  `ALTER RANGE default CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
+              )
+              await queryRunner.query(
+                  `ALTER DATABASE system CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
+              )
+              await queryRunner.query(
+                  `ALTER TABLE system.public.jobs CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
+              )
+              await queryRunner.query(
+                  `ALTER RANGE meta CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
+              )
+              await queryRunner.query(
+                  `ALTER RANGE system CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
+              )
+              await queryRunner.query(
+                  `ALTER RANGE liveness CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
+              )
+              await queryRunner.query(
+                  `SET CLUSTER SETTING jobs.retention_time = '180s';`,
+              )
+              await queryRunner.query(
+                  `SET CLUSTER SETTING kv.range_merge.queue_interval = '200ms'`,
+              )
+              await queryRunner.query(
+                  `SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = 'true'`,
+              )
+              await queryRunner.query(
+                  `SET CLUSTER SETTING sql.defaults.experimental_temporary_tables.enabled = 'true';`,
+              )
+          }
+
+          // create new schemas
+          const schemaPaths: Set<string> = new Set()
+          connection.entityMetadatas
+              .filter((entityMetadata) => !!entityMetadata.schema)
+              .forEach((entityMetadata) => {
+                  let schema = entityMetadata.schema!
+
+                  if (entityMetadata.database) {
+                      schema = `${entityMetadata.database}.${schema}`
+                  }
+
+                  schemaPaths.add(schema)
+              })
+
+          const schema = connection.driver.options?.hasOwnProperty("schema")
+              ? (connection.driver.options as any).schema
+              : undefined
+
+          if (schema) {
+              schemaPaths.add(schema)
+          }
+
+          for (const schemaPath of schemaPaths) {
+              try {
+                  await queryRunner.createSchema(schemaPath, true)
+              } catch (e) {
+                  // Do nothing
+              }
+          }
+
+          await queryRunner.release()
+      }),
+  )
+
+  return dataSources
+}
+
 /**
  * Creates a testing connections based on the configuration in the ormconfig.json
  * and given options that can override some of its configuration for the test-specific use case.
@@ -380,99 +478,7 @@ export async function createTestingConnections(
     options?: TestingOptions,
 ): Promise<DataSource[]> {
     const dataSourceOptions = setupTestingConnections(options)
-    const dataSources: DataSource[] = []
-    for (let options of dataSourceOptions) {
-        const dataSource = createDataSource(options)
-        await dataSource.initialize()
-        dataSources.push(dataSource)
-    }
-
-    await Promise.all(
-        dataSources.map(async (connection) => {
-            // create new databases
-            const databases: string[] = []
-            connection.entityMetadatas.forEach((metadata) => {
-                if (
-                    metadata.database &&
-                    databases.indexOf(metadata.database) === -1
-                )
-                    databases.push(metadata.database)
-            })
-
-            const queryRunner = connection.createQueryRunner()
-
-            for (const database of databases) {
-                await queryRunner.createDatabase(database, true)
-            }
-
-            if (connection.driver.options.type === "cockroachdb") {
-                await queryRunner.query(
-                    `ALTER RANGE default CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
-                )
-                await queryRunner.query(
-                    `ALTER DATABASE system CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
-                )
-                await queryRunner.query(
-                    `ALTER TABLE system.public.jobs CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
-                )
-                await queryRunner.query(
-                    `ALTER RANGE meta CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
-                )
-                await queryRunner.query(
-                    `ALTER RANGE system CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
-                )
-                await queryRunner.query(
-                    `ALTER RANGE liveness CONFIGURE ZONE USING num_replicas = 1, gc.ttlseconds = 60;`,
-                )
-                await queryRunner.query(
-                    `SET CLUSTER SETTING jobs.retention_time = '180s';`,
-                )
-                await queryRunner.query(
-                    `SET CLUSTER SETTING kv.range_merge.queue_interval = '200ms'`,
-                )
-                await queryRunner.query(
-                    `SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = 'true'`,
-                )
-                await queryRunner.query(
-                    `SET CLUSTER SETTING sql.defaults.experimental_temporary_tables.enabled = 'true';`,
-                )
-            }
-
-            // create new schemas
-            const schemaPaths: Set<string> = new Set()
-            connection.entityMetadatas
-                .filter((entityMetadata) => !!entityMetadata.schema)
-                .forEach((entityMetadata) => {
-                    let schema = entityMetadata.schema!
-
-                    if (entityMetadata.database) {
-                        schema = `${entityMetadata.database}.${schema}`
-                    }
-
-                    schemaPaths.add(schema)
-                })
-
-            const schema = connection.driver.options?.hasOwnProperty("schema")
-                ? (connection.driver.options as any).schema
-                : undefined
-
-            if (schema) {
-                schemaPaths.add(schema)
-            }
-
-            for (const schemaPath of schemaPaths) {
-                try {
-                    await queryRunner.createSchema(schemaPath, true)
-                } catch (e) {
-                    // Do nothing
-                }
-            }
-
-            await queryRunner.release()
-        }),
-    )
-
-    return dataSources
+    return createTestingConnectionsFromDataSourceOptions(dataSourceOptions)
 }
 
 /**

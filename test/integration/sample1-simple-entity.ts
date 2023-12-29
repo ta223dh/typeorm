@@ -4,66 +4,70 @@ import { DataSource } from "../../src/data-source/DataSource"
 import { Post } from "../../sample/sample1-simple-entity/entity/Post"
 import {
     closeTestingConnections,
-    createTestingConnections,
     reloadTestingDatabases,
+    setupTestingConnections,
+    createTestingConnectionsFromDataSourceOptions,
 } from "../utils/test-utils"
+import { DataSourceOptions } from "../../src"
+
+// function asyncSuite(name: string, setupSuite: () => Promise<Suite>) {
+//     suite(`Async dummy Suite for ${name}`, function () {
+//         let suite: Suite
+
+//         suiteSetup(async () => (suite = await setupSuite()))
+
+//         test(`Async tests for ${name} loaded`, async function () {
+//             assert.ok(suite.suites.length || suite.tests.length)
+//         })
+//     })
+// }
 
 describe("integration", function () {
-    let newPost: Post
-    let connections: DataSource[]
-
-    before(async () => {
-        connections = await createTestingConnections({ entities: [Post] })
-
-        if (!(connections.length >= 1)) {
-            throw new Error(
-                "No database connection found to run integration tests",
-            )
-        }
+    let dataSourceOptionsList: DataSourceOptions[] = setupTestingConnections({
+        entities: [Post],
     })
 
-    beforeEach(async function () {
-        await reloadTestingDatabases(connections)
+    if (dataSourceOptionsList.length < 1) {
+        throw new Error("No database connection found to run integration tests")
+    }
 
-        newPost = new Post()
-        newPost.text = "Hello post"
-        newPost.title = "this is post title"
-        newPost.likesCount = 0
-    })
+    for (const dataSourceOptions of dataSourceOptionsList) {
+        describe(`${dataSourceOptions.name}`, () => {
+            let newPost: Post
 
-    after(() => closeTestingConnections(connections))
+            let connection: DataSource
 
-    it(`database connection(s) exist`, async () => {
-        if (connections.length >= 1) {
-            printDatabases(connections)
-        }
+            before(async () => {
+                ;[connection] = await createTestingConnectionsFromDataSourceOptions([
+                    dataSourceOptions,
+                ])
+            })
 
-        expect(connections.length).greaterThanOrEqual(1)
-    })
+            beforeEach(async () => {
+                await reloadTestingDatabases([connection])
+                newPost = new Post()
+                newPost.text = "Hello post"
+                newPost.title = "this is post title"
+                newPost.likesCount = 0
+            })
 
-    it("create: should return the same post", () =>
-        Promise.all(
-            connections.map(async (connection) => {
+            after(() => closeTestingConnections([connection]))
+
+            it("create: should return the same post", async () => {
                 const postRepository = connection.getRepository(Post)
                 const savedPost = await postRepository.save(newPost)
 
                 savedPost.should.be.equal(newPost, connection.name)
-            }),
-        ))
+            })
 
-    it("create: should return post with an id", () =>
-        Promise.all(
-            connections.map(async (connection) => {
+            it("create: should return post with an id", async () => {
                 const postRepository = connection.getRepository(Post)
                 const savedPost = await postRepository.save(newPost)
 
                 expect(savedPost.id, connection.name).not.to.be.undefined
-            }),
-        ))
+            })
 
-    it("read: should return content of original post", () =>
-        Promise.all(
-            connections.map(async (connection) => {
+            it("read: should return content of original post", async () => {
                 const postRepository = connection.getRepository(Post)
                 const savedPost = await postRepository.save(newPost)
                 const insertedPost = await postRepository.findOneBy({
@@ -72,14 +76,7 @@ describe("integration", function () {
                 newPost.id = savedPost.id
 
                 insertedPost!.should.be.eql(newPost, connection.name)
-            }),
-        ))
-
-    function printDatabases(connections: DataSource[]) {
-        let message: string = "    Integration tests will run on:"
-        connections.forEach((connection) => {
-            message += " " + connection.name
+            })
         })
-        console.log(message)
     }
 })
