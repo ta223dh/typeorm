@@ -12,7 +12,7 @@ import { PostInformation } from "../../sample/sample2-one-to-one/entity/PostInfo
 import { closeTestingConnections, createTestingConnectionsFromDataSourceOptions, reloadTestingDatabases, setupTestingConnections } from "../utils/test-utils"
 import {DataSourceOptions} from '../../src'
 
-describe("one-to-one", function () {
+describe("integration -> one-to-one", function () {
     // -------------------------------------------------------------------------
     // Configuration
     // -------------------------------------------------------------------------

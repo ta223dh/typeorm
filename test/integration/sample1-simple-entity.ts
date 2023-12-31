@@ -10,7 +10,7 @@ import {
 } from "../utils/test-utils"
 import { DataSourceOptions } from "../../src"
 
-describe("integration", function () {
+describe("integration - > simple entity", function () {
     let dataSourceOptionsList: DataSourceOptions[] = setupTestingConnections({
         entities: [Post],
     })

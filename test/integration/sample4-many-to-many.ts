@@ -10,7 +10,7 @@ import { PostImage } from "../../sample/sample4-many-to-many/entity/PostImage"
 import { closeTestingConnections, createTestingConnectionsFromDataSourceOptions, reloadTestingDatabases, setupTestingConnections } from "../utils/test-utils"
 import {DataSourceOptions} from '../../src'
 
-describe("many-to-many", function () {
+describe("integration -> many-to-many", function () {
     // -------------------------------------------------------------------------
     // Configuration
     // -------------------------------------------------------------------------

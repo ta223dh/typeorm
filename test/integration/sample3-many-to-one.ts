@@ -12,7 +12,7 @@ import { PostInformation } from "../../sample/sample3-many-to-one/entity/PostInf
 import { closeTestingConnections, createTestingConnectionsFromDataSourceOptions, reloadTestingDatabases, setupTestingConnections } from "../utils/test-utils"
 import {DataSourceOptions} from '../../src'
 
-describe("many-to-one", function () {
+describe("integration -> many-to-one", function () {
     // -------------------------------------------------------------------------
     // Configuration
     // -------------------------------------------------------------------------
