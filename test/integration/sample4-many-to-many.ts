@@ -19,9 +19,9 @@ describe("integration -> many-to-many", function () {
         entities: [__dirname + "/../../sample/sample4-many-to-many/entity/*"],
     })
 
-    if (dataSourceOptionsList.length < 1) {
-        throw new Error("No database connection found to run integration tests")
-    }
+    it("runs for any database", () => {
+        expect(dataSourceOptionsList.length >= 1).to.be.true
+    })
 
     for (const dataSourceOptions of dataSourceOptionsList) {
         describe(`${dataSourceOptions.name}`, () => {

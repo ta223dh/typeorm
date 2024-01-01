@@ -15,9 +15,9 @@ describe("integration - > simple entity", function () {
         entities: [Post],
     })
 
-    if (dataSourceOptionsList.length < 1) {
-        throw new Error("No database connection found to run integration tests")
-    }
+    it('runs for any database', () => {
+        expect(dataSourceOptionsList.length >= 1).to.be.true
+    })
 
     for (const dataSourceOptions of dataSourceOptionsList) {
         describe(`${dataSourceOptions.name}`, () => {
