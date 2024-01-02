@@ -8,14 +8,14 @@ import {
     setupTestingConnections,
     createTestingConnectionsFromDataSourceOptions,
 } from "../utils/test-utils"
-import { DataSourceOptions } from "../../src"
+import { DataSourceOptions, Repository } from "../../src"
 
 describe("integration - > simple entity", function () {
     let dataSourceOptionsList: DataSourceOptions[] = setupTestingConnections({
         entities: [Post],
     })
 
-    it('runs for any database', () => {
+    it('dataSourceOptionsList should have at least one database config', () => {
         expect(dataSourceOptionsList.length >= 1).to.be.true
     })
 
@@ -24,6 +24,10 @@ describe("integration - > simple entity", function () {
             let newPost: Post
 
             let connection: DataSource
+
+            let postRepository : Repository<Post>
+
+            let savedPost: Post
 
             before(async () => {
                 ;[connection] = await createTestingConnectionsFromDataSourceOptions([
@@ -37,34 +41,30 @@ describe("integration - > simple entity", function () {
                 newPost.text = "Hello post"
                 newPost.title = "this is post title"
                 newPost.likesCount = 0
+
+                postRepository = connection.getRepository(Post)
+                savedPost = await postRepository.save(newPost)
             })
 
             after(() => closeTestingConnections([connection]))
 
             it("create: should return the same post", async () => {
-                const postRepository = connection.getRepository(Post)
-                const savedPost = await postRepository.save(newPost)
-
-                savedPost.should.be.equal(newPost, connection.name)
+                savedPost.should.be.equal(newPost)
             })
 
             it("create: should return post with an id", async () => {
-                const postRepository = connection.getRepository(Post)
-                const savedPost = await postRepository.save(newPost)
-
-                expect(savedPost.id, connection.name).not.to.be.undefined
+                expect(savedPost.id).not.to.be.undefined
             })
 
             it("read: should return content of original post", async () => {
-                const postRepository = connection.getRepository(Post)
-                const savedPost = await postRepository.save(newPost)
                 const insertedPost = await postRepository.findOneBy({
                     id: savedPost.id,
                 })
                 newPost.id = savedPost.id
 
-                insertedPost!.should.be.eql(newPost, connection.name)
+                insertedPost!.should.be.eql(newPost)
             })
         })
     }
 })
+
